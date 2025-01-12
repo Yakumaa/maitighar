@@ -8,7 +8,7 @@ const userSchema = new Schema({
     required: true,
     unique: true,
     minlength: 3,
-		trim: true,
+    trim: true,
   },
   passwordHash: {
     type: String,
@@ -17,17 +17,41 @@ const userSchema = new Schema({
   email: {
     type: String,
     unique: true,
-	required: true,
-  }, 
-  upvotedIssues: [{
-    type: Schema.Types.ObjectId,
-    ref: 'Issue', 
-  }], 
-  upvotedSuggestions: [{
-    type: Schema.Types.ObjectId,
-    ref: 'suggestion', 
-  }],
-  role: String,
+    required: true,
+  },
+  upvotedIssues: [
+    {
+      type: Schema.Types.ObjectId,
+      ref: "Issue",
+    },
+  ],
+  upvotedSuggestions: [
+    {
+      type: Schema.Types.ObjectId,
+      ref: "suggestion",
+    },
+  ],
+  role: {
+    type: String,
+    enum: ["User", "Ward Officer", "Admin"],
+    default: "User",
+  },
+  notifications: [
+    {
+      message: {
+        type: String,
+        required: true,
+      },
+      timestamp: {
+        type: Date,
+        default: Date.now,
+      },
+      read: {
+        type: Boolean,
+        default: false,
+      },
+    },
+  ],
 });
 
 userSchema.plugin(uniqueValidator);

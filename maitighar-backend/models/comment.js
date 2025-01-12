@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 
 const commentSchema = new Schema({
@@ -6,17 +6,17 @@ const commentSchema = new Schema({
     type: String,
     required: true,
   },
-  issue: { 
+  issue: {
     type: Schema.Types.ObjectId,
-    ref: 'Issue',
+    ref: "Issue",
   },
-  suggestion: { 
+  suggestion: {
     type: Schema.Types.ObjectId,
-    ref: 'Suggestion',
+    ref: "Suggestion",
   },
   createdBy: {
     type: Schema.Types.ObjectId,
-    ref: 'User',
+    ref: "User",
     required: true,
   },
   createdAt: {
@@ -25,21 +25,48 @@ const commentSchema = new Schema({
   },
   parentComment: {
     type: Schema.Types.ObjectId,
-    ref: 'Comment',
+    ref: "Comment",
     default: null,
   },
-  replies: [{
-    type: Schema.Types.ObjectId,
-    ref: 'Comment',
-  }]
+  replies: [
+    {
+      type: Schema.Types.ObjectId,
+      ref: "Comment",
+    },
+  ],
+  type: {
+    type: String,
+    enum: ["general", "wardOfficer"],
+    default: "general",
+  },
+  approvals: [
+    {
+      type: Schema.Types.ObjectId,
+      ref: "WardOfficer",
+    },
+  ],
+  isCommunityNote: {
+    type: Boolean,
+    default: false,
+  },
 });
+
+commentSchema.methods.checkApprovalThreshold = function (threshold = 1) {
+  if (this.approvals.length >= threshold) {
+    this.isCommunityNote = true;
+    return true;
+  }
+  return false;
+};
 
 commentSchema.set("toJSON", {
   transform: (document, returnedObject) => {
     returnedObject.id = returnedObject._id;
     delete returnedObject._id;
     delete returnedObject.__v;
-  }
+  },
 });
 
-module.exports = mongoose.model('Comment', commentSchema);
+commentSchema.index({ description: "text" });
+
+module.exports = mongoose.model("Comment", commentSchema);

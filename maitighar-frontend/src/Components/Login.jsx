@@ -13,9 +13,10 @@ import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Container from "@mui/material/Container";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
-import { login } from "../services/login";
 import { useState } from "react";
+import { login } from "../services/login";
 import { useUserDispatch } from "../context/UserContext";
+import { useNotification } from "../context/NotificationContext";
 
 function Copyright(props) {
   return (
@@ -26,11 +27,13 @@ function Copyright(props) {
       {...props}
     >
       {"Copyright © "}
-      <Link color="inherit" href="https://mui.com/">
+      <Link
+        color="inherit"
+        href="https://mui.com/"
+      >
         Maitighar
       </Link>{" "}
-      {new Date().getFullYear()}
-      {"."}
+      {new Date().getFullYear()}.
     </Typography>
   );
 }
@@ -59,10 +62,12 @@ export default function SignIn() {
   // }, [isAuthenticated, navigate]);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const userDispatch = useUserDispatch();
+  const { setNotification } = useNotification();
 
   const handleLogin = async (event) => {
-    event.preventDefault();
+    // event.preventDefault();
     // const data = new FormData(event.currentTarget);
     // console.log({
     //   email: data.get("email"),
@@ -74,18 +79,24 @@ export default function SignIn() {
     // };
     // loginMutation.mutate(credentials);
     event.preventDefault();
+    setError("");
     try {
-			console.log(username, password);
+      console.log(username, password);
       const user = await login({ username, password });
       userDispatch({ type: "LOGIN", payload: user });
-    } catch(err) {
+    } catch (err) {
+      setError("Invalid username or password");
+      setNotification({ message: "Login failed. Please try again.", status: "error" });
       console.log("Error", err.message);
     }
   };
 
   return (
     <ThemeProvider theme={defaultTheme}>
-      <Container component="main" maxWidth="xs">
+      <Container
+        component="main"
+        maxWidth="xs"
+      >
         <CssBaseline />
         <Box
           sx={{
@@ -95,13 +106,18 @@ export default function SignIn() {
             alignItems: "center",
           }}
         >
-          <Avatar sx={{ m: 1, bgcolor: "secondary.main" }}>
-            {/* <LockOutlinedIcon /> */}
-          </Avatar>
-          <Typography component="h1" variant="h5">
+          <Avatar sx={{ m: 1, bgcolor: "secondary.main" }}>{/* <LockOutlinedIcon /> */}</Avatar>
+          <Typography
+            component="h1"
+            variant="h5"
+          >
             Sign in
           </Typography>
-          <Box component="form" onSubmit={handleLogin} sx={{ mt: 1 }}>
+          <Box
+            component="form"
+            onSubmit={handleLogin}
+            sx={{ mt: 1 }}
+          >
             <TextField
               margin="normal"
               required
@@ -127,10 +143,24 @@ export default function SignIn() {
               onChange={({ target }) => setPassword(target.value)}
             />
             <FormControlLabel
-              control={<Checkbox value="remember" color="primary" />}
+              control={(
+                <Checkbox
+                  value="remember"
+                  color="primary"
+                />
+              )}
               label="Remember me"
             />
+            {error && (
+              <Typography
+                color="error"
+                align="center"
+              >
+                {error}
+              </Typography>
+            )}
             <Button
+              id="login-button"
               type="submit"
               fullWidth
               variant="contained"
@@ -139,13 +169,16 @@ export default function SignIn() {
               Sign In
             </Button>
             <Grid container>
-              <Grid item xs>
+              <Grid
+                item
+                xs
+              >
                 {/* <Link href="#" variant="body2">
                   Forgot password?
                 </Link> */}
               </Grid>
               <Grid item>
-                <Link to="/register">{"Don't have an account? Sign Up"}</Link>
+                <Link to="/register">Don't have an account? Sign Up</Link>
               </Grid>
             </Grid>
           </Box>

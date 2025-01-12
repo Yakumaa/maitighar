@@ -17,5 +17,10 @@ export const useAuthStatus = () => {
     setIsAuthenticated(!!user);
   }, [user]);
 
-  return { isAuthenticated, user, login, logout };
+  return {
+    isAuthenticated,
+    user,
+    login,
+    logout,
+  };
 };

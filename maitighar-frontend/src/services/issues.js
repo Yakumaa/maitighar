@@ -1,11 +1,27 @@
-import helpers from "../helpers/helpers";
 import axios from "axios";
+import helpers from "../helpers/helpers";
+
 const baseUrl = "/api/issues";
 
 const getAll = async () => {
   const config = helpers.getConfig();
   const request = await axios.get(baseUrl, config);
   return request.data;
+};
+
+const getNearby = async (latitude, longitude, maxDistance) => {
+  const config = helpers.getConfig();
+  const response = await fetch(
+    `${baseUrl}/nearby?latitude=${latitude}&longitude=${longitude}&maxDistance=${maxDistance}`,
+    config,
+  );
+  return response.json();
+};
+
+const getIssuesWardWise = async () => {
+  const config = helpers.getConfig();
+  const req = await axios.get(`${baseUrl}/ward`, config);
+  return req.json();
 };
 
 const createIssue = async (formData) => {
@@ -26,16 +42,7 @@ const createIssue = async (formData) => {
 };
 
 const getIssueId = async (id) => {
-  // const config = helpers.getConfig();
-  const userInfo = JSON.parse(localStorage.getItem("loggedUser"));
-  console.log(userInfo.token);
-  const config = {
-    headers: {
-      Authorization: `Bearer ${userInfo.token}`,
-    },
-  };
-  console.log("config", config);
-
+  const config = helpers.getConfig();
   const request = await axios.get(`${baseUrl}/${id}`, config);
   return request.data;
 };
@@ -59,19 +66,47 @@ const updateStatus = async (id, newStatus) => {
       Authorization: `Bearer ${adminInfo.token}`,
     },
   };
-  const response = await axios.put(
-    `/api/issues/${id}`,
-    { status: newStatus },
-    config,
-  );
+  const response = await axios.put(`/api/issues/${id}`, { status: newStatus }, config);
   return response.data;
+};
+
+const getRecentIssues = async (limit = 10) => {
+  const config = helpers.getConfig();
+  const response = await axios.get(`${baseUrl}/user?limit=${limit}`, config);
+  return response.data;
+};
+
+const updateIssue = async (id, updatedIssue) => {
+  try {
+    const config = helpers.getConfig();
+    const response = await axios.put(`${baseUrl}/${id}`, updatedIssue, config);
+    return response.data;
+  } catch (error) {
+    console.error("Error updating the issue:", error.response?.data || error.message);
+    throw error; // Re-throw the error to handle it in the calling function
+  }
+};
+
+const deleteIssue = async (id) => {
+  try {
+    const config = helpers.getConfig();
+    const response = await axios.delete(`${baseUrl}/${id}`, config);
+    return response.data;
+  } catch (error) {
+    console.error("Error deleting the issue:", error.response?.data || error.message);
+    throw error;
+  }
 };
 
 export default {
   getAll,
+  getNearby,
   createIssue,
   upvoteIssue,
   getIssueId,
   getIssuesByDepartment,
   updateStatus,
+  getRecentIssues,
+  updateIssue,
+  deleteIssue,
 };

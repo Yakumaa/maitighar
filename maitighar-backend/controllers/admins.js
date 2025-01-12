@@ -1,118 +1,448 @@
-const bcrypt = require("bcrypt");
 const adminRouter = require("express").Router();
 const Admin = require("../models/admin");
+const LocalGov = require("../models/localgov");
+const PromotionRequest = require("../models/promotionRequest");
+const WardOfficer = require("../models/wardOfficer");
+const User = require("../models/user");
+const Issue = require("../models/issue");
+const mongoose = require("mongoose");
 
-const departments = [
-  "Ward No.1",
-  "Ward No.2",
-  "Ward No.3",
-  "Ward No.4",
-  "Ward No.5",
-  "Ward No.6",
-  "Ward No.7",
-  "Ward No.8",
-  "Ward No.9",
-  "Ward No.10",
-  "Ward No.11",
-  "Ward No.12",
-  "Ward No.13",
-  "Ward No.14",
-  "Ward No.15",
-  "Ward No.16",
-  "Ward No.17",
-  "Ward No.18",
-  "Ward No.19",
-  "Ward No.20",
-  "Ward No.21",
-  "Ward No.22",
-  "Ward No.23",
-  "Ward No.24",
-  "Ward No.25",
-  "Ward No.26",
-  "Ward No.27",
-  "Ward No.28",
-  "Ward No.29",
-  "Ward No.30",
-  "Ward No.31",
-  "Ward No.32",
-];
-
+//Get all admins
 adminRouter.get("/", async (request, response) => {
+  try {
     const users = await Admin.find({});
     response.json(users);
+  } catch (error) {
+    console.error("Error fetching admins:", error);
+    response.status(500).json({ error: "Internal server error" });
+  }
+});
+adminRouter.get("/active-users", async (req, res) => {
+  try {
+    console.log(req.query);
+    const { province, district, localGovId, ward } = req.query;
+
+    if (!province || !district || !localGovId || !ward) {
+      return res.status(400).json({ error: "Missing required query parameters" });
+    }
+
+    // Validate the local government and ward
+    const localGov = await LocalGov.findById(localGovId);
+    if (!localGov || ward > localGov.number_of_wards) {
+      return res.status(400).json({ error: "Invalid ward number or local government ID" });
+    }
+
+    // Aggregate activity scores
+    const activeUsers = await Issue.aggregate([
+      {
+        $match: {
+          assigned_province: new mongoose.Types.ObjectId(province),
+          assigned_district: new mongoose.Types.ObjectId(district),
+          assigned_local_gov: new mongoose.Types.ObjectId(localGovId),
+          assigned_ward: parseInt(ward),
+        },
+      },
+      {
+        $lookup: {
+          from: "comments",
+          localField: "comments",
+          foreignField: "_id",
+          as: "issueComments",
+        },
+      },
+      {
+        $unwind: {
+          path: "$upvotedBy",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $unwind: {
+          path: "$issueComments",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $group: {
+          _id: "$upvotedBy",
+          activityScore: { $sum: 1 },
+          commentsScore: {
+            $sum: { $cond: [{ $ifNull: ["$issueComments.createdBy", false] }, 1, 0] },
+          }, // Count comments
+        },
+      },
+      {
+        $addFields: {
+          totalActivityScore: { $add: ["$activityScore", "$commentsScore"] },
+        },
+      },
+      {
+        $sort: { totalActivityScore: -1 },
+      },
+      {
+        $limit: 10,
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "_id",
+          as: "userDetails",
+        },
+      },
+      {
+        $unwind: "$userDetails",
+      },
+      {
+        $project: {
+          _id: 0,
+          userId: "$userDetails._id",
+          username: "$userDetails.username",
+          email: "$userDetails.email",
+          activityScore: "$totalActivityScore",
+        },
+      },
+    ]);
+
+    res.json(activeUsers);
+  } catch (error) {
+    res.status(500).json({ error: "Error fetching active users", details: error.message });
+  }
 });
 
+adminRouter.get("/me", async (request, response) => {
+  try {
+    const user = request.user;
+    const userType = request.userType;
+
+    if (!user) {
+      return response.status(404).json({ error: "No user found in request" });
+    }
+
+    if (userType === "admin") {
+      const adminData = {
+        username: user.username,
+        email: user.email,
+        responsible: user.responsible,
+        assigned_province: user.assigned_province,
+        assigned_district: user.assigned_district,
+        assigned_local_gov: user.assigned_local_gov,
+        assigned_ward: user.assigned_ward,
+        assigned_department: user.assigned_department,
+      };
+      return response.json(adminData);
+    }
+
+    if (userType === "user") {
+      const userData = {
+        username: user.username,
+        email: user.email,
+      };
+      return response.json(userData);
+    }
+
+    return response.status(400).json({ error: "Unknown user type" });
+  } catch (error) {
+    console.error("Error fetching user/admin info:", error);
+    return response.status(500).json({ error: "Internal server error" });
+  }
+});
+
+adminRouter.get("/promotion-requests", async (request, response) => {
+  try {
+    const adminId = request.user._id;
+    const admin = await Admin.findById(adminId).select(
+      "username email responsible assigned_province assigned_district assigned_local_gov assigned_ward",
+    );
+
+    if (admin.responsible !== "ward") {
+      return response.status(400).json({ error: "Not applicable for departments." });
+    }
+
+    const requests = await PromotionRequest.find({
+      status: "Pending",
+      assigned_province: admin.assigned_province,
+      assigned_ward: admin.assigned_ward,
+    })
+      .populate("user", "username email role")
+      .exec();
+
+    const userIds = requests.map((req) => req.user._id);
+
+    const userStats = await Issue.aggregate([
+      {
+        $match: {
+          assigned_province: new mongoose.Types.ObjectId(admin.assigned_province),
+          assigned_district: new mongoose.Types.ObjectId(admin.assigned_district),
+          assigned_local_gov: new mongoose.Types.ObjectId(admin.assigned_local_gov),
+          assigned_ward: admin.assigned_ward,
+        },
+      },
+      {
+        $lookup: {
+          from: "comments",
+          localField: "comments",
+          foreignField: "_id",
+          as: "issueComments",
+        },
+      },
+      {
+        $unwind: { path: "$upvotedBy", preserveNullAndEmptyArrays: true },
+      },
+      {
+        $unwind: { path: "$issueComments", preserveNullAndEmptyArrays: true },
+      },
+      {
+        $group: {
+          _id: "$upvotedBy",
+          activityScore: { $sum: 1 },
+          commentsScore: {
+            $sum: { $cond: [{ $ifNull: ["$issueComments.createdBy", false] }, 1, 0] },
+          },
+        },
+      },
+      {
+        $addFields: {
+          totalActivityScore: { $add: ["$activityScore", "$commentsScore"] },
+        },
+      },
+      {
+        $match: { _id: { $in: userIds } }, // Match users involved in the requests
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "_id",
+          as: "userDetails",
+        },
+      },
+      {
+        $unwind: "$userDetails",
+      },
+      {
+        $project: {
+          userId: "$userDetails._id",
+          username: "$userDetails.username",
+          email: "$userDetails.email",
+          activityScore: "$totalActivityScore",
+        },
+      },
+    ]);
+
+    // Map stats to requests
+    const requestsWithStats = requests.map((req) => {
+      const stats = userStats.find((stat) => String(stat.userId) === String(req.user._id)) || {
+        activityScore: 0,
+        commentsScore: 0,
+        totalActivityScore: 0,
+      };
+      return {
+        ...req.toObject(),
+        userStats: stats,
+      };
+    });
+
+    response.status(200).json(requestsWithStats);
+  } catch (error) {
+    console.error("Error fetching promotion requests:", error);
+    response.status(500).json({ error: "Internal server error." });
+  }
+});
+
+adminRouter.post("/promotion-review", async (request, response) => {
+  try {
+    const { id, status } = request.body;
+
+    if (!["Accepted", "Declined"].includes(status)) {
+      return response.status(400).json({ error: "Invalid status." });
+    }
+
+    const promotionRequest = await PromotionRequest.findById(id);
+
+    if (!promotionRequest) {
+      return response.status(404).json({ error: "Promotion request not found." });
+    }
+    if (status === "Accepted") {
+      const user = await User.findById(promotionRequest.user);
+      user.role = promotionRequest.requestedRole;
+      promotionRequest.status = status;
+      const wardOfficer = WardOfficer({
+        user: user._id,
+        assigned_province: promotionRequest.assigned_province,
+        assigned_district: promotionRequest.assigned_district,
+        assigned_local_gov: promotionRequest.assigned_local_gov,
+        assigned_ward: promotionRequest.assigned_ward,
+      });
+      await wardOfficer.save();
+      await promotionRequest.save();
+      await user.save();
+    }
+    response.status(200).json({ message: `Request ${status.toLowerCase()} successfully.` });
+  } catch (error) {
+    console.error("Error reviewing promotion request:", error);
+    response.status(500).json({ error: "Internal server error." });
+  }
+});
+
+//Get admin by ID
 adminRouter.get("/:id", async (request, response) => {
   try {
     const { id } = request.params;
-    const admin = await Admin.findById(id).select('username email department');
-    
+    const admin = await Admin.findById(id).select("username email department");
+
     if (admin) {
       return response.json({
         username: admin.username,
         email: admin.email,
         department: admin.department,
-        id: admin._id
+        id: admin._id,
       });
     } else {
       return response.status(404).json({ error: "Admin not found" });
     }
   } catch (error) {
-    console.error('Error fetching admin info:', error);
+    console.error("Error fetching admin info:", error);
     return response.status(500).json({ error: "Internal server error" });
   }
 });
 
-adminRouter.post("/", async (request, response) => {
-	console.log(request.body);
-    const { username, password, repassword, email, department } = request.body;
-    
-    if (!username || !password || !repassword || !email || !department ||
-        username.trim() === "" || password.trim() === "" || repassword.trim() === "" || email.trim() === "") {
-        return response
-            .status(400)
-            .json({ error: "username, password, repassword, email, and department are required" });
+const isAdmin = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user || user.role !== "admin") {
+      return res.status(403).json({ error: "Admin access required" });
     }
-    if (username.length < 3 || password.length < 3) {
-        return response.status(400).json({
-            error: "username and password should contain at least 3 characters",
-        });
+    next();
+  } catch (error) {
+    res.status(500).json({ error: "Error verifying admin status" });
+  }
+};
+
+// Promote user to ward officer
+adminRouter.post("/promote-ward-officer", isAdmin, async (req, res) => {
+  try {
+    const { userId, assigned_province, assigned_district, assigned_local_gov, assigned_ward } =
+      req.body;
+
+    if (
+      !userId ||
+      !assigned_province ||
+      !assigned_district ||
+      !assigned_local_gov ||
+      !assigned_ward
+    ) {
+      return res.status(400).json({ error: "Missing required fields" });
     }
-    if (password !== repassword) {
-        return response.status(400).json({ error: "passwords do not match" });
-    }
-    if (!departments.includes(department)) {
-        return response.status(400).json({ error: "Invalid department" });
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
     }
 
-    // Check if department already exists
-    const existingAdmin = await Admin.findOne({ department });
-    if (existingAdmin) {
-        return response.status(400).json({ error: "An admin for this department already exists" });
+    const existingOfficer = await WardOfficer.findOne({ user: userId });
+    if (existingOfficer) {
+      return res.status(400).json({ error: "User is already a ward officer" });
     }
-
-    const saltRounds = 10;
-    const passwordHash = await bcrypt.hash(password, saltRounds);
-    const admin = new Admin({
-        username,
-        passwordHash,
-        email,
-        department,
+    const officerCount = await WardOfficer.countDocuments({
+      assigned_local_gov,
+      assigned_ward,
+      is_active: true,
     });
-    try {
-        const savedAdmin = await admin.save();
-        return response.status(201).json(savedAdmin);
-    } catch (error) {
-        if (error.name === "ValidationError") {
-            return response.status(400).json({ error: error.message });
-        }
-        if (error.code === 11000) {
-            // Duplicate key error
-            return response.status(400).json({
-                error: "Username or email already exists",
-            });
-        }
-        return response.status(500).json({ error: "Something went wrong" });
+
+    if (officerCount >= 5) {
+      return res.status(400).json({
+        error: "This ward already has the maximum number of ward officers (5)",
+      });
     }
+
+    const localGov = await LocalGov.findById(assigned_local_gov);
+    if (!localGov || assigned_ward > localGov.number_of_wards) {
+      return res
+        .status(400)
+        .json({ error: "Invalid ward number for the selected local government" });
+    }
+
+    // Create new ward officer
+    const wardOfficer = new WardOfficer({
+      user: userId,
+      assigned_province,
+      assigned_district,
+      assigned_local_gov,
+      assigned_ward,
+      appointed_date: new Date(),
+      is_active: true,
+    });
+
+    await wardOfficer.save();
+
+    // Update user's role
+    user.role = "wardOfficer";
+    await user.save();
+
+    res.status(201).json({
+      message: "User successfully promoted to ward officer",
+      wardOfficer,
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "Error promoting user to ward officer",
+      details: error.message,
+    });
+  }
 });
+
+// Deactivate ward officer
+adminRouter.post("/deactivate-ward-officer/:id", isAdmin, async (req, res) => {
+  try {
+    const wardOfficer = await WardOfficer.findById(req.params.id);
+    if (!wardOfficer) {
+      return res.status(404).json({ error: "Ward officer not found" });
+    }
+
+    wardOfficer.is_active = false;
+    await wardOfficer.save();
+
+    // Update user's role back to regular user
+    const user = await User.findById(wardOfficer.user);
+    if (user) {
+      user.role = "user";
+      await user.save();
+    }
+
+    res.json({ message: "Ward officer successfully deactivated" });
+  } catch (error) {
+    res.status(500).json({
+      error: "Error deactivating ward officer",
+      details: error.message,
+    });
+  }
+});
+
+// Get all ward officers with filters
+adminRouter.get("/ward-officers", isAdmin, async (req, res) => {
+  try {
+    const { province, district, local_gov, ward, active_only } = req.query;
+
+    const filter = {};
+    if (province) filter.assigned_province = province;
+    if (district) filter.assigned_district = district;
+    if (local_gov) filter.assigned_local_gov = local_gov;
+    if (ward) filter.assigned_ward = parseInt(ward);
+    if (active_only === "true") filter.is_active = true;
+
+    const wardOfficers = await WardOfficer.find(filter)
+      .populate("user", "username email")
+      .populate("assigned_province", "name")
+      .populate("assigned_district", "name")
+      .populate("assigned_local_gov", "name");
+
+    res.json(wardOfficers);
+  } catch (error) {
+    res.status(500).json({
+      error: "Error fetching ward officers",
+      details: error.message,
+    });
+  }
+});
+
 module.exports = adminRouter;

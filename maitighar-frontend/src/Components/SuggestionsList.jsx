@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
-import issueService from "../services/issues";
 import {
   Table,
   TableBody,
@@ -15,22 +14,26 @@ import {
   FormControlLabel,
   Radio,
 } from "@mui/material";
+import { useNavigate } from "react-router-dom";
+import { useNotification } from "../context/NotificationContext";
+import issueService from "../services/issues";
 
-const SuggestionsList = () => {
+function SuggestionsList() {
   const [suggestions, setSuggestions] = useState([]);
+  const { setNotification } = useNotification();
+  const navigate = useNavigate();
   const adminData = JSON.parse(localStorage.getItem("loggedAdmin"));
-  const department = adminData.department;
-  const token = adminData.token;
+  const { token } = adminData;
+
+  const handleIssueClick = (id) => {
+    navigate(`/admin/details/${id}`);
+  };
 
   const handleStatusChange = async (id, newStatus) => {
     console.log("Updating status for issue ID:", id, "to:", newStatus);
     try {
       const updatedIssue = await issueService.updateStatus(id, newStatus);
-      setSuggestions((prevIssues) =>
-        prevIssues.map((issue) =>
-          issue.id === id ? { ...issue, status: newStatus } : issue
-        )
-      );
+      setSuggestions((prevIssues) => prevIssues.map((issue) => (issue.id === id ? { ...issue, status: newStatus } : issue)));
       console.log("Updated issue status:", updatedIssue);
     } catch (error) {
       console.error("Error updating status:", error);
@@ -38,24 +41,34 @@ const SuggestionsList = () => {
   };
 
   useEffect(() => {
-    const config = {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+    const fetchIssues = async () => {
+      try {
+        const config = {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        };
+        const response = await axios.get("/api/issues/admin", {
+          params: { adminId: adminData.id },
+          ...config, // Spread the config here
+        });
+        setSuggestions(response.data);
+      } catch (error) {
+        console.error("Error fetching issues:", error);
+        setNotification({ message: " Error Fetching issues.", status: "error" });
+      }
     };
-    console.log("config", config);
+    fetchIssues();
+  }, [token]);
 
-    axios
-      .get(`/api/issues/admin/${department}`, config)
-      .then((response) => setSuggestions(response.data))
-      .catch((error) => console.error(error));
-  }, [department, token]);
-
-  const suggestionsList = suggestions.filter(issue => issue.type === "suggestion");
+  const suggestionsList = suggestions.filter((issue) => issue.type === "suggestion");
 
   return (
     <div>
-      <Typography variant="h4" gutterBottom>
+      <Typography
+        variant="h4"
+        gutterBottom
+      >
         Suggestions
       </Typography>
       <TableContainer component={Paper}>
@@ -70,7 +83,10 @@ const SuggestionsList = () => {
           </TableHead>
           <TableBody>
             {suggestionsList.map((issue) => (
-              <TableRow key={issue.id}>
+              <TableRow
+                key={issue.id}
+                onClick={() => handleIssueClick(issue.id)}
+              >
                 <TableCell>{issue.upvotes}</TableCell>
                 <TableCell>{issue.title}</TableCell>
                 <TableCell>{issue.description}</TableCell>
@@ -79,9 +95,7 @@ const SuggestionsList = () => {
                     <RadioGroup
                       // row
                       value={issue.status}
-                      onChange={(e) =>
-                        handleStatusChange(issue.id, e.target.value)
-                      }
+                      onChange={(e) => handleStatusChange(issue.id, e.target.value)}
                     >
                       <FormControlLabel
                         value="open"
@@ -108,7 +122,6 @@ const SuggestionsList = () => {
       </TableContainer>
     </div>
   );
-};
+}
 
 export default SuggestionsList;
-
